@@ -1,0 +1,324 @@
+
+<?php
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+
+require_once 'koneksi.php';
+
+// Ambil daftar menu
+$menu = $conn->query("
+    SELECT * FROM menu
+    WHERE tersedia = 1
+    ORDER BY kategori, nama
+");
+
+if (!$menu) {
+    die('Query menu gagal: ' . $conn->error);
+}
+
+$daftar_menu = [];
+
+while ($row = $menu->fetch_assoc()) {
+    $daftar_menu[] = $row;
+}
+
+// Ambil nomor antrian terakhir hari ini
+$q = $conn->query("
+    SELECT MAX(nomor_antrian) AS terakhir
+    FROM pesanan
+    WHERE DATE(created_at) = CURDATE()
+");
+
+if (!$q) {
+    die('Query pesanan gagal: ' . $conn->error);
+}
+
+$row_antrian = $q->fetch_assoc();
+
+$terakhir = ($row_antrian && $row_antrian['terakhir'] !== null)
+    ? (int) $row_antrian['terakhir']
+    : 0;
+
+$nomor_berikutnya = $terakhir + 1;
+?>
+
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kasir - Kantin</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="container">
+
+    <div class="nav">
+        <a href="index.php">Kasir</a>
+        <a href="display.php">Display Antrian</a>
+        <a href="admin.php">Admin Menu</a>
+    </div>
+
+    <h1>Kasir Kantin</h1>
+
+    <p>
+        Nomor antrian berikutnya:
+        <strong><?= $nomor_berikutnya ?></strong>
+    </p>
+
+    <h2>Pilih Menu</h2>
+
+    <div class="menu-grid">
+
+        <?php foreach ($daftar_menu as $m): ?>
+
+            <div class="menu-item">
+
+                <div class="nama">
+                    <?= htmlspecialchars($m['nama']) ?>
+                </div>
+
+                <div class="harga">
+                    Rp <?= number_format($m['harga'], 0, ',', '.') ?>
+                </div>
+
+                <button
+                    class="btn-tambah"
+                    data-id="<?= (int) $m['id'] ?>"
+                    data-nama="<?= htmlspecialchars($m['nama'], ENT_QUOTES, 'UTF-8') ?>"
+                    data-harga="<?= (int) $m['harga'] ?>"
+                    <?= (int) $m['stok'] <= 0 ? 'disabled' : '' ?>
+                >
+                    <?= (int) $m['stok'] <= 0 ? 'Stok Habis' : 'Tambah' ?>
+                </button>
+
+            </div>
+
+        <?php endforeach; ?>
+
+    </div>
+
+    <div class="keranjang">
+
+        <h2>Keranjang</h2>
+
+        <table id="tabel-keranjang">
+
+            <thead>
+                <tr>
+                    <th>Menu</th>
+                    <th>Qty</th>
+                    <th>Subtotal</th>
+                    <th></th>
+                </tr>
+            </thead>
+
+            <tbody></tbody>
+
+        </table>
+
+        <div class="total" id="total">
+            Total: Rp 0
+        </div>
+
+        <div class="aksi">
+
+            <button class="btn-bayar" onclick="bayar()">
+                Bayar & Buat Antrian
+            </button>
+
+            <button class="btn-batal" onclick="resetKeranjang()">
+                Batal
+            </button>
+
+        </div>
+
+    </div>
+
+</div>
+
+<script>
+
+let keranjang = [];
+
+// Tambahkan menu
+document.querySelectorAll('.btn-tambah').forEach(button => {
+
+    button.addEventListener('click', function () {
+
+        tambahItem(
+            Number(this.dataset.id),
+            this.dataset.nama,
+            Number(this.dataset.harga)
+        );
+
+    });
+
+});
+
+function tambahItem(id, nama, harga) {
+
+    const ada = keranjang.find(item => item.id === id);
+
+    if (ada) {
+        ada.qty++;
+    } else {
+        keranjang.push({
+            id: id,
+            nama: nama,
+            harga: harga,
+            qty: 1
+        });
+    }
+
+    renderKeranjang();
+}
+
+// Hapus menu
+function hapusItem(id) {
+
+    keranjang = keranjang.filter(item => item.id !== id);
+
+    renderKeranjang();
+
+}
+
+// Tampilkan keranjang
+function renderKeranjang() {
+
+    const tbody = document.querySelector('#tabel-keranjang tbody');
+
+    tbody.innerHTML = '';
+
+    let total = 0;
+
+    keranjang.forEach(item => {
+
+        const subtotal = item.harga * item.qty;
+
+        total += subtotal;
+
+        const tr = document.createElement('tr');
+
+        const tdNama = document.createElement('td');
+        tdNama.textContent = item.nama;
+
+        const tdQty = document.createElement('td');
+        tdQty.textContent = item.qty;
+
+        const tdSubtotal = document.createElement('td');
+        tdSubtotal.textContent =
+            'Rp ' + subtotal.toLocaleString('id-ID');
+
+        const tdAksi = document.createElement('td');
+
+        const tombolHapus = document.createElement('button');
+
+        tombolHapus.textContent = 'X';
+
+        tombolHapus.style.background = '#c0392b';
+        tombolHapus.style.color = '#fff';
+        tombolHapus.style.border = 'none';
+        tombolHapus.style.padding = '4px 8px';
+        tombolHapus.style.borderRadius = '4px';
+        tombolHapus.style.cursor = 'pointer';
+
+        tombolHapus.addEventListener('click', function () {
+            hapusItem(item.id);
+        });
+
+        tdAksi.appendChild(tombolHapus);
+
+        tr.appendChild(tdNama);
+        tr.appendChild(tdQty);
+        tr.appendChild(tdSubtotal);
+        tr.appendChild(tdAksi);
+
+        tbody.appendChild(tr);
+
+    });
+
+    document.getElementById('total').textContent =
+        'Total: Rp ' + total.toLocaleString('id-ID');
+
+}
+
+// Kosongkan keranjang
+function resetKeranjang() {
+
+    keranjang = [];
+
+    renderKeranjang();
+
+}
+
+// Proses pembayaran
+function bayar() {
+
+    if (keranjang.length === 0) {
+
+        alert('Keranjang masih kosong.');
+
+        return;
+
+    }
+
+    const total = keranjang.reduce(
+        (s, i) => s + i.harga * i.qty,
+        0
+    );
+
+    const data = new FormData();
+
+    data.append('keranjang', JSON.stringify(keranjang));
+
+    data.append('total', total);
+
+    fetch('proses.php', {
+        method: 'POST',
+        body: data
+    })
+
+    .then(response => {
+
+        if (!response.ok) {
+            throw new Error('HTTP Error: ' + response.status);
+        }
+
+        return response.json();
+
+    })
+
+    .then(res => {
+
+        if (res.sukses) {
+
+            alert('Pesanan berhasil. Nomor antrian: ' + res.nomor);
+
+            resetKeranjang();
+
+            location.reload();
+
+        } else {
+
+            alert('Gagal: ' + res.pesan);
+
+        }
+
+    })
+
+    .catch(error => {
+
+        console.error(error);
+
+        alert('Terjadi kesalahan koneksi atau respons server.');
+
+    });
+
+}
+
+</script>
+
+</body>
+</html>
